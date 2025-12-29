@@ -156,15 +156,39 @@ def _summarize_edge_state(edge_state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 def _tool_plan_route(args: Dict[str, Any]) -> Dict[str, Any]:
-    kind = args["kind"]
-    rect = args["rect"]
+    """
+    Tool: plan_route
+    Input schema (from OpenAI tool params):
+      kind: "PERIMETER_RECT" | "PATROL_LAWNMOWER"
+      rect: {xmin,xmax,ymin,ymax}
+      margin?: number
+      n_stripes?: integer
+
+    Output:
+      {"waypoints": [{"x":..,"y":..}, ...]}
+    """
+    kind = (args.get("kind") or "").upper()
+    rect = args.get("rect")
+    if not isinstance(rect, dict):
+        raise ValueError("plan_route.rect must be an object")
+
+    # validate rect keys
+    for k in ("xmin", "xmax", "ymin", "ymax"):
+        if k not in rect:
+            raise ValueError(f"plan_route.rect missing key: {k}")
+
     if kind == "PERIMETER_RECT":
         margin = float(args.get("margin", 4.0))
-        return {"waypoints": plan_perimeter_rect(rect, margin=margin)}
+        waypoints = plan_perimeter_rect(rect, margin=margin)
+        return {"waypoints": waypoints}
+
     if kind == "PATROL_LAWNMOWER":
-        n = int(args.get("n_stripes", 6))
-        return {"waypoints": plan_lawnmower(rect, n_stripes=n)}
-    return {"error": f"unknown kind={kind}"}
+        n_stripes = int(args.get("n_stripes", 6))
+        waypoints = plan_lawnmower(rect, n_stripes=n_stripes)
+        return {"waypoints": waypoints}
+
+    raise ValueError(f"Unsupported kind: {kind}")
+
 
 def _tool_dispatch_task(args: Dict[str, Any]) -> Dict[str, Any]:
     if "task" not in args:
@@ -191,45 +215,65 @@ def run_agent_turn(
     user_message: Optional[str],
     mode: str,
 ) -> Tuple[str, List[Dict[str, Any]], Dict[str, Any]]:
-    """
-    mode:
-      - "AUTO": 自动决策（可以 dispatch）
-      - "CHAT": 人类对话介入（可能 dispatch，也可能只解释）
-    Returns: assistant_text, actions_log, latest_edge_obs
-    """
     edge_state = edge_fetch_state(EDGE_BASE_URL)
     obs = _summarize_edge_state(edge_state)
 
     input_items = [{"role": "system", "content": SYSTEM}]
-    input_items += session_messages[-20:]  # demo：只保留最近 20 条
-    input_items.append({"role": "user", "content": f"[EDGE_OBS]\n{json.dumps(obs, ensure_ascii=False)}\n[/EDGE_OBS]\nMode={mode}"})
+    input_items += session_messages[-20:]
+    input_items.append({
+        "role": "user",
+        "content": f"[EDGE_OBS]\n{json.dumps(obs, ensure_ascii=False)}\n[/EDGE_OBS]\nMode={mode}"
+    })
     if user_message:
         input_items.append({"role": "user", "content": user_message})
 
+    actions: List[Dict[str, Any]] = []
+    trace: List[Dict[str, Any]] = []   # ✅ 记录全过程
+    assistant_text = ""
+
     resp = client.responses.create(
-        model="gpt-4o-mini",
+        model="gpt-4o",
         input=input_items,
         tools=TOOLS,
     )
 
-    actions: List[Dict[str, Any]] = []
-    assistant_text = ""
+    with open(f"chat_all_history.log", "a") as f:
+        f.write(f"[AGENT] input: {json.dumps(input_items, ensure_ascii=False)}\n")
+        f.write(f"[AGENT] output: {resp}\n")
 
-    print("[DEBUG] Initial agent response:", resp)
     while True:
-        
+        # ✅ 记录每一轮模型输出（包含 function_call / message 等）
+        trace.append({
+            "stage": "model_output",
+            "output": [o.model_dump() if hasattr(o, "model_dump") else dict(o) for o in resp.output],
+            "output_text": getattr(resp, "output_text", None),
+        })
+
         calls = [o for o in resp.output if o.type == "function_call"]
         if not calls:
             assistant_text = resp.output_text or ""
             break
 
         tool_outputs = []
+        plan_route_called = False
+
         for c in calls:
             name = c.name
             args = json.loads(c.arguments or "{}")
 
             if name == "plan_route":
+                if plan_route_called:
+                    out = {"skipped": True, "reason": "duplicate plan_route in same turn"}
+                    tool_outputs.append({
+                        "type": "function_call_output",
+                        "call_id": c.call_id,
+                        "output": json.dumps(out, ensure_ascii=False),
+                    })
+                    continue
+
+                plan_route_called = True
                 out = _tool_plan_route(args)
+                actions.append({"tool": "plan_route", "args": args, "result": out})
             elif name == "dispatch_task":
                 out = _tool_dispatch_task(args)
                 actions.append({"tool": "dispatch_task", "args": args, "result": out})
@@ -238,6 +282,7 @@ def run_agent_turn(
                 actions.append({"tool": "dispatch_batch", "args": args, "result": out})
             else:
                 out = {"error": f"unknown tool {name}"}
+                actions.append({"tool": name, "args": args, "result": out})
 
             tool_outputs.append({
                 "type": "function_call_output",
@@ -245,25 +290,33 @@ def run_agent_turn(
                 "output": json.dumps(out, ensure_ascii=False),
             })
 
+        # ✅ 记录你喂回去的 tool outputs
+        trace.append({
+            "stage": "tool_outputs",
+            "tool_outputs": tool_outputs,
+        })
+
         resp = client.responses.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             input=resp.output + tool_outputs,
             tools=TOOLS,
         )
 
-        try:
-            log_chat(
-                sid="N/A",
-                user=user_message or "",
-                assistant=assistant_text,
-                extra={
-                    "mode": mode,
-                    "edge_obs": obs,
-                    "actions": actions,
-                }
-            )
-        except Exception as e:
-            print("[WARN] log_chat failed:", e)
+    # ✅ 注意：log 和 return 一定要在 while 外面
+    try:
+        log_chat(
+            sid="N/A",
+            user=user_message or "",
+            assistant=assistant_text,
+            extra={
+                "mode": mode,
+                "edge_obs": obs,
+                "actions": actions,
+                "trace": trace,  # ✅ 这就是你缺的“LLM过程”
+                "input_items": input_items,  # 可选：把输入也存下来便于复现
+            }
+        )
+    except Exception as e:
+        print("[WARN] log_chat failed:", e)
 
-        return assistant_text, actions, obs
-        
+    return assistant_text, actions, obs

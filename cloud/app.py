@@ -11,6 +11,8 @@ from .schemas import (
     CreateSessionResp, ChatReq, ChatResp, TickReq, TickResp, SessionStateResp
 )
 from .agent import run_agent_turn
+from .trace import trace_agent_call
+
 
 app = FastAPI(title="Cloud UAV Agent", version="0.1")
 store = SessionStore()
@@ -66,10 +68,16 @@ def chat(sid: str, req: ChatReq):
         return ChatResp(reply=reply, actions=[], edge_obs=sess.last_edge_obs or {})
 
     try:
-        reply, actions, obs = run_agent_turn(
-            session_messages=sess.messages,
-            user_message=None,   # 已经 append 进 messages 了
+        reply, actions, obs = trace_agent_call(
+            sid=sid,
             mode="CHAT",
+            session_messages=sess.messages,
+            user_message=req.message,
+            call_fn=lambda: run_agent_turn(
+                session_messages=sess.messages,
+                user_message=None,
+                mode="CHAT",
+            )
         )
     except Exception as e:
         reply = f"[ERROR] {e}"
@@ -82,7 +90,7 @@ def chat(sid: str, req: ChatReq):
 
     # 如果用户说开启自动化
     if "start automation" in req.message.lower() or "enable automation" in req.message.lower():
-        _start_auto(sid, edge)
+        _start_auto(sid)
 
     return ChatResp(reply=reply, actions=actions, edge_obs=obs)
 
@@ -102,7 +110,7 @@ def tick(sid: str, req: TickReq):
 
 @app.post("/sessions/{sid}/auto/start")
 def auto_start(sid: str):
-    return _start_auto(sid, EDGE_BASE_URL)
+    return _start_auto(sid)
 
 @app.post("/sessions/{sid}/auto/stop")
 def auto_stop(sid: str):
@@ -116,16 +124,22 @@ def auto_stop(sid: str):
 
 def _auto_loop(sid: str, stop: threading.Event):
     while not stop.is_set():
+        print(f"[AUTO] session {sid} tick")
         try:
             sess = store.get(sid)
         except KeyError:
             return
         if not sess.auto_enabled:
-            time.sleep(0.2)
+            time.sleep(2)
             continue
 
         try:
+            print(f"[AUTO] session {sid} running agent turn")
             reply, actions, obs = run_agent_turn(session_messages=sess.messages, user_message=None, mode="AUTO")
+            with open(f"/tmp/auto_{sid}.log", "a") as f:
+                f.write(f"[AUTO] reply: {reply}\n")
+                f.write(f"[AUTO] actions: {actions}\n")
+                f.write(f"[AUTO] obs: {obs}\n")
             sess.last_edge_obs = obs
             sess.last_actions.extend(actions)
             sess.messages.append({"role": "assistant", "content": reply})

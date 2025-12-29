@@ -118,6 +118,26 @@ def main():
             # Overlay：如果有 fire event，就画“严格绕火区范围”的 perimeter
             overlay = UIOverlay(polylines=[])
 
+            DRONE_COLORS = {
+                "D1": (70, 120, 190),
+                "D2": (120, 190, 70),
+                "D3": (190, 70, 120),
+                "D4": (190, 160, 70),
+            }
+
+            for d in state.drones:
+                task = getattr(d, "task", None)
+                if not task:
+                    continue
+                if getattr(task, "type", None) == "PATH":
+                    wps = getattr(task, "waypoints", None) or []
+                    pts = [UIVec2(p.x, p.y) for p in wps]
+                    if len(pts) >= 2:
+                        overlay.polylines.append(
+                            (f"patrol:{d.id}", pts, DRONE_COLORS.get(d.id, (70, 120, 190)), 2)
+                        )
+
+
             fire = pick_latest_fire_event(state)
             if fire is not None:
                 # 找 fire zone（按名字或 type）
