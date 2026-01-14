@@ -1,1 +1,7 @@
 venv/
+test_patrol_mock.py
+verify_*.py
+__pycache__/
+*.pyc
+.DS_Store
+edge_trace.jsonl
