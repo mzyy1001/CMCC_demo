@@ -88,7 +88,6 @@ def chat(sid: str, req: ChatReq):
     sess.last_actions.extend(actions)
     sess.messages.append({"role": "assistant", "content": reply})
 
-    # 如果用户说开启自动化
     if "start automation" in req.message.lower() or "enable automation" in req.message.lower():
         _start_auto(sid)
 

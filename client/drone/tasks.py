@@ -63,6 +63,12 @@ class HoldTask(Task):
     # hold_eps 控制允许的小偏差（比如控制误差/漂移容忍）
     hold_eps: float = 0.8
 
+@dataclass
+class FirefightingTask(Task):
+    target: Vec2 = Vec2(0.0, 0.0)
+    duration_s: Optional[float] = 10.0
+    elapsed_s: float = 0.0
+
 
 @dataclass
 class ReturnHomeTask(Task):
