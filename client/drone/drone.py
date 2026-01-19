@@ -161,8 +161,6 @@ class Drone:
 
         return events
 
-    # ---------------- internal helpers ----------------
-
     def _set_status(self, new_status: DroneStatus, ts: float, reason: str) -> List[DroneEvent]:
         if new_status == self.status:
             return []

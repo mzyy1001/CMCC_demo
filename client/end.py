@@ -30,6 +30,8 @@ def rect_to_perimeter(xmin: float, xmax: float, ymin: float, ymax: float, margin
         UIVec2(xmin, ymin),
     ]
 
+
+
 def adapt_state_to_ui(state) -> Tuple[List[UIDroneState], List[UIZoneState]]:
     drones_ui: List[UIDroneState] = []
     for d in state.drones:
@@ -70,6 +72,26 @@ def start_uvicorn_in_thread(host: str = "0.0.0.0", port: int = 8001):
     t = threading.Thread(target=server.run, daemon=True)
     t.start()
     return server, t
+
+
+def find_zone_by_fire_event(zones_ui: List[UIZoneState], fire_event) -> Optional[UIZoneState]:
+    """
+    根据 FIRE_DETECTED event 找到对应的 fire zone（优先用 payload.zone_name）
+    """
+    payload = getattr(fire_event, "payload", None) or {}
+    zone_name = payload.get("zone_name")
+
+    if zone_name:
+        for z in zones_ui:
+            if z.name == zone_name:
+                return z
+
+    # fallback：如果 payload 没有 zone_name，就退回用 name/type 粗略匹配
+    for z in zones_ui:
+        if z.type == "FIRE_RISK" or "FireZone" in z.name:
+            return z
+
+    return None
 
 # ----------------- main -----------------
 
@@ -142,10 +164,16 @@ def main():
             if fire is not None:
                 # 找 fire zone（按名字或 type）
                 fire_zone = None
+                fire_zones = []
                 for z in zones_ui:
                     if z.type == "FIRE_RISK" or "FireZone" in z.name:
-                        fire_zone = z
-                        break
+                        fire_zones.append(z)
+
+                for fire_zone in fire_zones:
+                    xmin, xmax, ymin, ymax = fire_zone.rect
+                    perimeter = rect_to_perimeter(xmin, xmax, ymin, ymax, margin=PERIMETER_MARGIN)
+                    overlay.polylines.append((f"fire_perimeter:{fire_zone.id}", perimeter, (255, 210, 120), 4))
+
 
                 if fire_zone is not None:
                     xmin, xmax, ymin, ymax = fire_zone.rect

@@ -1,103 +1,77 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
-import logging
 
-from cloud.config import EDGE_BASE_URL
-from cloud.tools import (
-    edge_fetch_state, 
-    edge_batch, 
-    plan_lawnmower, 
-    plan_perimeter_rect
+from typing import Any, Dict, List, Optional
+
+from tool import (
+    get_event,
+    edge_get_state,
+    edge_batch_assign,
+    find_zone_from_event,
+    zone_center,
+    rect_to_perimeter_waypoints,
+    pick_best_drones,
+    mk_task_id,
 )
 
-logger = logging.getLogger("cloud.actions")
 
 def act_patrol(
     trace_id: str,
     num_drones: int,
-    patrol_mode: str = "SWEEP",   # "SWEEP" | "PERIMETER"
-    constraints: dict | None = None
+    event_num: int,
+    constraints: dict | None = None,
 ) -> dict:
     """
-    Request a patrol behavior.
-    
-    Args:
-        trace_id: Unique ID for this action request
-        num_drones: Number of drones to dispatch
-        patrol_mode: "SWEEP" (Lawnmower) or "PERIMETER" (Boundary)
-        constraints: Optional args, e.g. {"rect": {...}, "zone_id": "..."}
-        
-    Returns:
-        Result dict with selected drones and dispatch status
+    根据 event_list 第 event_num 条事件，派遣普通无人机 D* 去对应 zone 巡检（PATH 围绕）。
+
+    constraints:
+      - margin: float (default 3.0) perimeter 外扩
+      - loop: bool (default True)
     """
-    print(f"[ACTION] act_patrol trace={trace_id} n={num_drones} mode={patrol_mode}")
-    
-    # 1. Fetch current state to find available drones
+    constraints = constraints or {}
+
     try:
-        state = edge_fetch_state(EDGE_BASE_URL)
-    except Exception as e:
-        return {"ok": False, "error": f"Failed to fetch state: {e}"}
+        ev = get_event(event_num)
+        state = edge_get_state()
+        zone = find_zone_from_event(state, ev)
 
-    all_drones = state.get("drones", [])
-    # Filter for IDLE drones
+        if zone is None:
+            return {"ok": False, "error": "Cannot find target zone from event", "event": ev}
 
-    idle_drones = [d for d in all_drones if d.get("status") == "IDLE"]
-    
-    if len(idle_drones) < num_drones:
-        return {
-            "ok": False, 
-            "error": f"Not enough idle drones. Needed {num_drones}, found {len(idle_drones)}",
-            "found": [d["id"] for d in idle_drones]
-        }
-        
-    # Select the first N
-    selected_drones = idle_drones[:num_drones]
-    selected_ids = [d["id"] for d in selected_drones]
-    
-    # 2. Determine target area (Geometry)
+        target_xy = zone_center(zone)
+        picked = pick_best_drones(state, num=num_drones, want_fire=False, target_xy=target_xy)
 
-    rect = None
-    if constraints:
-        rect = constraints.get("rect")
-        
-    if not rect:
-        # Default patrol area (e.g. center of map)
-        rect = {"xmin": 20, "xmax": 80, "ymin": 20, "ymax": 80}
+        if not picked:
+            return {"ok": False, "error": "No available patrol drones (D*)", "event": ev, "zone": zone}
 
-    # 3. Plan Path
-    waypoints = []
-    if patrol_mode.upper() == "PERIMETER":
-        waypoints = plan_perimeter_rect(rect)
-    else:
-        # Default to SWEEP / LAWNMOWER
-        # n_stripes depends on rect size, default 4?
-        waypoints = plan_lawnmower(rect, n_stripes=4)
-        
-    if not waypoints:
-         return {"ok": False, "error": "Path planning failed (no waypoints generated)"}
+        margin = float(constraints.get("margin", 3.0))
+        loop = bool(constraints.get("loop", True))
 
-    # 4. Dispatch Commands
-    commands = []
-    for drone_id in selected_ids:
-        # Basic strategy: All drones independently patrol the same path 
-        # Type PATH
-        task = {
-            "type": "PATH",
-            "waypoints": waypoints,
-            "loop": True
-        }
-        commands.append({
-            "drone_id": drone_id,
-            "task": task
-        })
-        
-    print(f"[ACTION] Dispatching {len(commands)} commands for patrol.")
-    try:
-        result = edge_batch(EDGE_BASE_URL, commands)
+        waypoints = rect_to_perimeter_waypoints(zone["rect"], margin=margin)
+
+        commands: List[Dict[str, Any]] = []
+        for did in picked:
+            commands.append({
+                "drone_id": did,
+                "task": {
+                    "type": "PATH",
+                    "id": mk_task_id("patrol", trace_id, did),
+                    "waypoints": waypoints,
+                    "loop": loop,
+                }
+            })
+
+        resp = edge_batch_assign(commands)
+
         return {
             "ok": True,
-            "selected_drones": selected_ids,
-            "dispatch_result": result
+            "trace_id": trace_id,
+            "action": "patrol",
+            "event_num": event_num,
+            "event": ev,
+            "zone": zone,
+            "picked_drones": picked,
+            "edge_response": resp,
         }
+
     except Exception as e:
-        return {"ok": False, "error": f"Dispatch failed: {e}"}
+        return {"ok": False, "error": str(e)}

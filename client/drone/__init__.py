@@ -9,6 +9,7 @@ from .tasks import (
     ReturnHomeTask,
 )
 from .drone import Drone, DroneConfig
+from .fire_drone import FirefightingDrone, FirefightingConfig
 
 __all__ = [
     "Vec2",
@@ -24,4 +25,6 @@ __all__ = [
     "ReturnHomeTask",
     "Drone",
     "DroneConfig",
+    "FirefightingDrone",
+    "FirefightingConfig",
 ]

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import threading
 import time
+import random
+
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional, Tuple, Literal
 
@@ -9,7 +11,10 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 # 你的现有模块
-from drone import Drone, DroneConfig, Vec2, DroneStatus, TaskType, PathTask, GoToTask
+from drone import (
+    Drone, DroneConfig, Vec2, DroneStatus, TaskType, PathTask, GoToTask,
+    FirefightingDrone, FirefightingConfig
+)
 from world import Map2D, Zone, ZoneType, Rect, ZoneEventPolicy, TriggerMode, WorldEventType
 
 
@@ -85,21 +90,42 @@ class EdgeRuntime:
         self.world = Map2D(world_w, world_h)
         self.world.set_seed(0)
 
-        fire_rect = Rect(42, 58, 42, 58)
-        self.fire_zone = Zone(
-            id="z_fire",
-            name="FireZone-A",
-            type=ZoneType.FIRE_RISK,
-            rect=fire_rect,
-            policy=ZoneEventPolicy(
-                trigger_mode=TriggerMode.ON_ENTER,
-                probability=1.0,
-                severity=0.9,
-                confidence=0.85,
-                cooldown_s=9999.0,
-            ),
-        )
-        self.world.add_zone(self.fire_zone)
+        rng = random.Random(time.time())   # 每次启动随机；想复现就换成固定 seed(int)
+
+        FIRE_N_MIN, FIRE_N_MAX = 2, 3
+        FIRE_SIZE_MIN, FIRE_SIZE_MAX = 6.0, 12.0   # 火场更小：边长范围 6~12
+        BORDER = 8.0                               # 离地图边缘留点距离，避免贴边
+
+        n_fire = rng.randint(FIRE_N_MIN, FIRE_N_MAX)
+        self.fire_zones: List[Zone] = []
+
+        for i in range(n_fire):
+            w = rng.uniform(FIRE_SIZE_MIN, FIRE_SIZE_MAX)
+            h = rng.uniform(FIRE_SIZE_MIN, FIRE_SIZE_MAX)
+
+            xmin = rng.uniform(BORDER, world_w - BORDER - w)
+            ymin = rng.uniform(BORDER, world_h - BORDER - h)
+            xmax = xmin + w
+            ymax = ymin + h
+
+            fire_rect = Rect(xmin, xmax, ymin, ymax)
+
+            z = Zone(
+                id=f"z_fire_{i+1}",
+                name=f"FireZone-{i+1}",
+                type=ZoneType.FIRE_RISK,
+                rect=fire_rect,
+                policy=ZoneEventPolicy(
+                    trigger_mode=TriggerMode.ON_ENTER,
+                    probability=1.0,
+                    severity=float(rng.uniform(0.75, 0.95)),
+                    confidence=float(rng.uniform(0.75, 0.95)),
+                    cooldown_s=9999.0,
+                ),
+            )
+
+            self.world.add_zone(z)
+            self.fire_zones.append(z)
 
         # drones
         cfg = DroneConfig(speed_mps=1.6, battery_drain_per_s=0.02, heartbeat_period_s=1.0)
@@ -121,6 +147,35 @@ class EdgeRuntime:
             )
             for did, pos in corners.items()
         }
+
+        ff_cfg = FirefightingConfig(
+            speed_mps=1.8,
+            battery_drain_per_s=0.03,
+            heartbeat_period_s=1.0,
+            agent_capacity=80.0,
+            agent_use_per_s=1.5,
+            suppress_range_m=6.0,
+            refill_at_home=True,
+        )
+
+        dock_y = MARGIN
+        dock_x0 = world_w * 0.5 - 6.0
+
+        fire_docks = {
+            "FD1": Vec2(dock_x0 + 0.0, dock_y),
+            "FD2": Vec2(dock_x0 + 4.0, dock_y),
+            "FD3": Vec2(dock_x0 + 8.0, dock_y),
+            "FD4": Vec2(dock_x0 + 12.0, dock_y),
+        }
+
+        for did, pos in fire_docks.items():
+            self.drones[did] = FirefightingDrone(
+                id=did,
+                pos=pos,
+                home=Vec2(pos.x, pos.y),
+                config=ff_cfg,
+            )
+
 
         # default patrol routes (端侧启动就让它们先巡逻，云侧再接管也行)
         # routes: Dict[str, List[Vec2]] = {
@@ -319,3 +374,5 @@ def assign_task(req: AssignTaskRequest):
 @app.post("/cmd/batch")
 def batch(req: BatchAssignRequest):
     return runtime.batch_assign(req.commands)
+
+
