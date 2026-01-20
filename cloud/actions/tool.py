@@ -176,5 +176,20 @@ def pick_best_drones(
     return [d["id"] for d in cand[:num]]
 
 
+
 def mk_task_id(prefix: str, trace_id: str, drone_id: str) -> str:
     return f"{prefix}_{trace_id}_{drone_id}_{int(time.time())}"
+
+
+def plan_lawnmower(rect: Dict[str, float], n_stripes: int = 6) -> List[Dict[str, float]]:
+    xmin, xmax, ymin, ymax = rect["xmin"], rect["xmax"], rect["ymin"], rect["ymax"]
+    n_stripes = max(2, int(n_stripes))
+    step = (xmax - xmin) / (n_stripes - 1)
+    pts: List[Dict[str, float]] = []
+    for i in range(n_stripes):
+        x = xmin + i * step
+        if i % 2 == 0:
+            pts += [{"x": x, "y": ymin}, {"x": x, "y": ymax}]
+        else:
+            pts += [{"x": x, "y": ymax}, {"x": x, "y": ymin}]
+    return pts

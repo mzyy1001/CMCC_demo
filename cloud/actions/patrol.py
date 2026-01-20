@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from tool import (
+from .tool import (
     get_event,
     edge_get_state,
     edge_batch_assign,
@@ -11,42 +11,54 @@ from tool import (
     rect_to_perimeter_waypoints,
     pick_best_drones,
     mk_task_id,
+    plan_lawnmower,
 )
+
 
 
 def act_patrol(
     trace_id: str,
     num_drones: int,
-    event_num: int,
+    patrol_mode: str = "SWEEP",
+    event_num: int | None = None,
     constraints: dict | None = None,
 ) -> dict:
     """
-    根据 event_list 第 event_num 条事件，派遣普通无人机 D* 去对应 zone 巡检（PATH 围绕）。
+    派遣普通无人机 D* 进行全图（或指定区域）扫描巡逻（Lawnmower）。
 
-    constraints:
-      - margin: float (default 3.0) perimeter 外扩
-      - loop: bool (default True)
+    Args:
+      event_num: int (optional) - Read context from events_dedup.txt
+      patrol_mode: "SWEEP" (default)
+      constraints: rect, n_stripes, loop
     """
     constraints = constraints or {}
 
     try:
-        ev = get_event(event_num)
+        # Resolve Event for Context (Optional)
+        if event_num is not None:
+            try:
+                ev = get_event(event_num)
+                # Future: Could use ev['pos'] to set default rect center
+            except Exception:
+                pass
+
         state = edge_get_state()
-        zone = find_zone_from_event(state, ev)
-
-        if zone is None:
-            return {"ok": False, "error": "Cannot find target zone from event", "event": ev}
-
-        target_xy = zone_center(zone)
-        picked = pick_best_drones(state, num=num_drones, want_fire=False, target_xy=target_xy)
-
-        if not picked:
-            return {"ok": False, "error": "No available patrol drones (D*)", "event": ev, "zone": zone}
-
-        margin = float(constraints.get("margin", 3.0))
+        
+        # Default scan area 0-100 if not provided
+        rect = constraints.get("rect", {"xmin": 0, "xmax": 100, "ymin": 0, "ymax": 100})
+        n_stripes = int(constraints.get("n_stripes", 6))
         loop = bool(constraints.get("loop", True))
 
-        waypoints = rect_to_perimeter_waypoints(zone["rect"], margin=margin)
+        # Use center of rect for drone selection proximity
+        cx = (rect["xmin"] + rect["xmax"]) / 2
+        cy = (rect["ymin"] + rect["ymax"]) / 2
+
+        picked = pick_best_drones(state, num=num_drones, want_fire=False, target_xy=(cx, cy))
+
+        if not picked:
+            return {"ok": False, "error": "No available patrol drones (D*)"}
+
+        waypoints = plan_lawnmower(rect, n_stripes=n_stripes)
 
         commands: List[Dict[str, Any]] = []
         for did in picked:
@@ -66,11 +78,9 @@ def act_patrol(
             "ok": True,
             "trace_id": trace_id,
             "action": "patrol",
-            "event_num": event_num,
-            "event": ev,
-            "zone": zone,
             "picked_drones": picked,
             "edge_response": resp,
+            "waypoints": waypoints 
         }
 
     except Exception as e:
