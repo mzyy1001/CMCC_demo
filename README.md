@@ -7,6 +7,7 @@ def act_patrol(
     trace_id: str,
     num_drones: int,
     patrol_mode: str = "SWEEP",   # "SWEEP" | "HOLD_CORNERS"
+    event_num: int | None = None,
     constraints: dict | None = None
 ) -> dict:
     """
@@ -18,11 +19,12 @@ def act_patrol(
 def act_firefight(
     trace_id: str,
     num_drones: int,
-    target_zone_id: str = "z_fire",
+    event_num: int,
     constraints: dict | None = None
 ) -> dict:
     """
-    Request a firefighting behavior.
+    Request a firefighting behavior for a specific event.
+    logic: get event -> find zone -> goto center
     """
     pass
 
@@ -30,12 +32,11 @@ def act_firefight(
 def act_survey(
     trace_id: str,
     num_drones: int,
-    target_pos: dict | None = None,   # {"x": float, "y": float}
-    target_zone_id: str | None = None,
+    event_num: int,
     constraints: dict | None = None
 ) -> dict:
     """
-    Request a survey behavior.
+    Request a survey behavior for a specific event.
     """
     pass
 ```

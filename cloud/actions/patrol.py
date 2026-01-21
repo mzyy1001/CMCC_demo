@@ -24,12 +24,18 @@ def act_patrol(
     constraints: dict | None = None,
 ) -> dict:
     """
-    派遣普通无人机 D* 进行全图（或指定区域）扫描巡逻（Lawnmower）。
+    Request a patrol behavior (Lawnmower Pattern).
+    派遣普通无人机 D* 进行区域扫描。默认扫描全图 (0-100)，也可以通过 constraints 指定矩形区域。
 
     Args:
-      event_num: int (optional) - Read context from events_dedup.txt
-      patrol_mode: "SWEEP" (default)
-      constraints: rect, n_stripes, loop
+      trace_id: unique task trace id
+      num_drones: number of drones to dispatch
+      patrol_mode: "SWEEP" (default, Lawnmower logic)
+      event_num: int | None (optional) - if provided, reads event context from events_dedup.txt (currently for logging/context only)
+      constraints: dict (optional parameters)
+          - rect: {"xmin": float, "xmax": float, "ymin": float, "ymax": float} (default: 0-100 map)
+          - n_stripes: int (default 6) - number of scan lines
+          - loop: bool (default True) - whether to repeat the pattern
     """
     constraints = constraints or {}
 
