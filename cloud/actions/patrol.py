@@ -31,11 +31,21 @@ def act_patrol(
       trace_id: unique task trace id
       num_drones: number of drones to dispatch
       patrol_mode: "SWEEP" (default, Lawnmower logic)
-      event_num: int | None (optional) - if provided, reads event context from events_dedup.txt (currently for logging/context only)
+      event_num: int | None (optional) - if provided, reads event context from events_dedup.txt
       constraints: dict (optional parameters)
           - rect: {"xmin": float, "xmax": float, "ymin": float, "ymax": float} (default: 0-100 map)
           - n_stripes: int (default 6) - number of scan lines
           - loop: bool (default True) - whether to repeat the pattern
+
+    Returns:
+        dict: containing execution result:
+            - ok (bool): Success status.
+            - trace_id (str): Input trace_id.
+            - action (str): "patrol".
+            - picked_drones (List[str]): IDs of drones assigned.
+            - edge_response (dict): Response from edge server assignment.
+            - waypoints (List[dict]): Generated path points.
+            - error (str, optional): Error message if failed.
     """
     constraints = constraints or {}
 
