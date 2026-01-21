@@ -1,10 +1,13 @@
-from .tool import (
+from __future__ import annotations
+
+from typing import Any, Dict, List
+
+from tool import (
     get_event,
     edge_get_state,
     edge_batch_assign,
     find_zone_from_event,
     zone_center,
-    rect_to_perimeter_waypoints,
     pick_best_drones,
     mk_task_id,
 )
@@ -17,11 +20,10 @@ def act_survey(
     constraints: dict | None = None,
 ) -> dict:
     """
-    根据 event_list 第 event_num 条事件，派遣普通无人机 D* 去对应 zone 巡检（PATH 围绕）。
+    根据 event_list 第 event_num 条事件，派遣普通无人机 D* 去对应 zone 调查（GOTO zone center）。
 
     constraints:
-      - margin: float (default 3.0) perimeter 外扩
-      - loop: bool (default True)
+      - arrive_eps: float (default 2.0)
     """
     constraints = constraints or {}
 
@@ -33,26 +35,24 @@ def act_survey(
         if zone is None:
             return {"ok": False, "error": "Cannot find target zone from event", "event": ev}
 
-        target_xy = zone_center(zone)
-        picked = pick_best_drones(state, num=num_drones, want_fire=False, target_xy=target_xy)
+        cx, cy = zone_center(zone)
 
+        # ✅ 这里 want_fire=False -> 选普通无人机 D*
+        picked = pick_best_drones(state, num=num_drones, want_fire=False, target_xy=(cx, cy))
         if not picked:
-            return {"ok": False, "error": "No available patrol drones (D*)", "event": ev, "zone": zone}
+            return {"ok": False, "error": "No available survey drones (D*)", "event": ev, "zone": zone}
 
-        margin = float(constraints.get("margin", 3.0))
-        loop = bool(constraints.get("loop", True))
-
-        waypoints = rect_to_perimeter_waypoints(zone["rect"], margin=margin)
+        arrive_eps = float(constraints.get("arrive_eps", 2.0))
 
         commands: List[Dict[str, Any]] = []
         for did in picked:
             commands.append({
                 "drone_id": did,
                 "task": {
-                    "type": "PATH",
+                    "type": "GOTO",
                     "id": mk_task_id("survey", trace_id, did),
-                    "waypoints": waypoints,
-                    "loop": loop,
+                    "target": {"x": cx, "y": cy},
+                    "arrive_eps": arrive_eps,
                 }
             })
 

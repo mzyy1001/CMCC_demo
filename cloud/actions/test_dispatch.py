@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 import httpx
 
 from tool import load_events, edge_get_state
-from patrol import act_patrol
+from survey import act_survey
 from firefight import act_firefight
 
 
@@ -65,12 +65,12 @@ def main():
     print("[INFO] tasks before:", {k: ("None" if v is None else v.get("type")) for k, v in tasks0.items()})
 
     # 3) dispatch patrol (normal drones)
-    r_patrol = act_patrol(trace_id="test_patrol", num_drones=2, event_num=event_num)
+    r_patrol = act_survey(trace_id="test_patrol", num_drones=2, event_num=event_num)
     print("[PATROL]", json.dumps(r_patrol, ensure_ascii=False, indent=2))
-    assert_true(r_patrol.get("ok") is True, f"act_patrol failed: {r_patrol}")
+    assert_true(r_patrol.get("ok") is True, f"act_survey failed: {r_patrol}")
 
     patrol_drones: List[str] = r_patrol.get("picked_drones") or []
-    assert_true(len(patrol_drones) > 0, "act_patrol picked_drones empty")
+    assert_true(len(patrol_drones) > 0, "act_survey picked_drones empty")
 
     # 4) dispatch firefight (fire drones)
     r_fire = act_firefight(trace_id="test_firefight", num_drones=2, event_num=event_num)
