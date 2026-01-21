@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from .tool import (
+from tool import (
     get_event,
     edge_get_state,
     edge_batch_assign,

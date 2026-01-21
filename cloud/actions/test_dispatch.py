@@ -7,10 +7,9 @@ from typing import Any, Dict, List
 
 import httpx
 
-from cloud.actions.tool import load_events, edge_get_state
-from cloud.actions.patrol import act_patrol
-from cloud.actions.firefight import act_firefight
-from cloud.actions.survey import act_survey
+from tool import load_events, edge_get_state
+from survey import act_survey
+from firefight import act_firefight
 
 
 EDGE_BASE_URL = os.getenv("EDGE_BASE_URL", "http://127.0.0.1:8001")
@@ -66,24 +65,14 @@ def main():
     print("[INFO] tasks before:", {k: ("None" if v is None else v.get("type")) for k, v in tasks0.items()})
 
     # 3) dispatch patrol (normal drones)
-    # Note: patrol accepts optional event_num for context
-    r_patrol = act_patrol(trace_id="test_patrol", num_drones=2, event_num=event_num)
+    r_patrol = act_survey(trace_id="test_patrol", num_drones=2, event_num=event_num)
     print("[PATROL]", json.dumps(r_patrol, ensure_ascii=False, indent=2))
-    assert_true(r_patrol.get("ok") is True, f"act_patrol failed: {r_patrol}")
+    assert_true(r_patrol.get("ok") is True, f"act_survey failed: {r_patrol}")
 
     patrol_drones: List[str] = r_patrol.get("picked_drones") or []
-    # assert_true(len(patrol_drones) > 0, "act_patrol picked_drones empty") 
-    # (might be empty if drones busy, but let's assume successful for test flow)
+    assert_true(len(patrol_drones) > 0, "act_survey picked_drones empty")
 
-    # 4) dispatch survey (strict event-driven)
-    # Using the same event (assuming it has a zone)
-    r_survey = act_survey(trace_id="test_survey", num_drones=1, event_num=event_num)
-    print("[SURVEY]", json.dumps(r_survey, ensure_ascii=False, indent=2))
-    assert_true(r_survey.get("ok") is True, f"act_survey failed: {r_survey}")
-    
-    survey_drones: List[str] = r_survey.get("picked_drones") or []
-
-    # 5) dispatch firefight (fire drones)
+    # 4) dispatch firefight (fire drones)
     r_fire = act_firefight(trace_id="test_firefight", num_drones=2, event_num=event_num)
     print("[FIREFIGHT]", json.dumps(r_fire, ensure_ascii=False, indent=2))
     assert_true(r_fire.get("ok") is True, f"act_firefight failed: {r_fire}")
